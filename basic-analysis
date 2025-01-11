@@ -1,0 +1,180 @@
+import pandas as pd;
+import numpy as np
+import matplotlib.pyplot as plt
+
+df = pd.read_csv("tcs.csv")
+
+df.columns = df.columns.str.replace(" ", "")
+df['ClosePrice'] = df['ClosePrice'].astype(str).str.replace(',', '').astype(float)
+
+df["SMA_5"] = df["ClosePrice"].rolling(window=5).mean()
+df['SMA_10'] = df['ClosePrice'].rolling(window=10).mean()
+
+df['EMA_2'] = df['ClosePrice'].ewm(span=2, adjust=False).mean()
+df['EMA_5'] = df['ClosePrice'].ewm(span=5, adjust=False).mean()
+
+df["trendLong"] = np.where(df["SMA_5"] > df["SMA_10"], "Bullish", "Bearish")
+df["trendShort"] = np.where(df["EMA_2"] > df["EMA_5"], "Bullish", "Bearish")
+
+df[["SMA_5", "SMA_10", "trendLong"]].dropna()
+df[["EMA_2", "EMA_5", "trendShort"]].dropna()
+
+plt.figure(figsize=(12, 6))
+plt.plot(df['ClosePrice'], label='Close Price')
+plt.plot(df['SMA_5'], label='5-Day SMA')
+plt.plot(df['SMA_10'], label='10-Day SMA')
+
+plt.title('Stock Trend with Simple Moving Averages')
+plt.xlabel('Date')
+plt.ylabel('Price')
+plt.legend()
+plt.show()
+
+plt.figure(figsize=(12, 6))
+plt.plot(df['ClosePrice'], label='Close Price')
+plt.plot(df['EMA_2'], label='2-Day EMA')
+plt.plot(df['EMA_5'], label='5-Day EMA')
+
+plt.title('Stock Trend with Exponential Moving Averages')
+plt.xlabel('Date')
+plt.ylabel('Price')
+plt.legend()
+plt.show()
+
+print("Long trend",df["trendLong"].mode())
+print("Short trend", df["trendShort"].mode())
+
+# volume analysis
+
+df["TotalTradedQuantity"] = df["TotalTradedQuantity"].str.replace(',', '').astype(float)
+# df["TotalTradedQuantity"] = df["TotalTradedQuantity"] / 10000 # Convert to million
+
+fig, ax1 = plt.subplots(figsize=(12, 6))
+
+ax1.set_xlabel('Date')
+ax1.set_ylabel('Close Price', color='tab:blue')
+ax1.plot(df['ClosePrice'], color='tab:blue', label='Close Price')
+ax1.tick_params(axis='y', labelcolor='tab:blue')
+
+ax2 = ax1.twinx()
+ax2.set_ylabel('Volume', color='tab:gray')
+ax2.plot(df['TotalTradedQuantity'], color='tab:gray', label='Volume', alpha=0.3)
+ax2.tick_params(axis='y', labelcolor='tab:gray')
+
+# plt.plot(df['TotalTradedQuantity'], label='Volume')
+# plt.plot(df['ClosePrice'], label='Close Price')
+plt.legend()
+plt.title('Stock Close Price and Volume')
+
+plt.title('Stock Close Price and Volume')
+plt.show()
+
+#volume trend
+# Convert TotalTradedQuantity to numeric (if not already)
+# df["TotalTradedQuantity"] = pd.to_numeric(df["TotalTradedQuantity"], errors="coerce")
+
+# Calculate Trends
+def identify_trend(row):
+    if row["ClosePrice"] > row["SMA_5"] and row["ClosePrice"] > row["SMA_10"] and row["TotalTradedQuantity"] > df["TotalTradedQuantity"].mean():
+        return "Bullish"
+    elif row["ClosePrice"] < row["SMA_5"] and row["ClosePrice"] < row["SMA_10"] and row["TotalTradedQuantity"] > df["TotalTradedQuantity"].mean():
+        return "Bearish"
+    else:
+        return "Weak"
+
+# Apply the trend identification function
+df["VolumeTrend"] = df.apply(identify_trend, axis=1)
+
+# Display the volume trend
+print(df["VolumeTrend"].mode())
+
+
+#RSI
+RSI_PERIOD = 14
+
+# Step 1: Calculate daily price changes
+df["Change"] = df["ClosePrice"].diff()
+
+# Step 2: Separate gains and losses
+df["Gain"] = df["Change"].apply(lambda x: x if x > 0 else 0)
+df["Loss"] = df["Change"].apply(lambda x: -x if x < 0 else 0)
+
+# Step 3: Calculate average gains and losses (rolling window)
+df["Avg_Gain"] = df["Gain"].rolling(window=RSI_PERIOD, min_periods=1).mean()
+df["Avg_Loss"] = df["Loss"].rolling(window=RSI_PERIOD, min_periods=1).mean()
+
+# Step 4: Compute the Relative Strength (RS)
+df["RS"] = df["Avg_Gain"] / df["Avg_Loss"]
+
+# Step 5: Calculate RSI
+df["RSI"] = 100 - (100 / (1 + df["RS"]))
+
+plt.figure(figsize=(10, 5))
+plt.plot(df["Date"], df["ClosePrice"], label="Close Price", color="blue")
+plt.twinx()
+plt.plot(df["Date"], df["RSI"], label="RSI", color="red")
+plt.axhline(70, color="green", linestyle="--", label="Overbought (70)")
+plt.axhline(30, color="orange", linestyle="--", label="Oversold (30)")
+plt.title("RSI Analysis")
+plt.legend()
+plt.show()
+
+
+# Updated Price and RSI Trends
+df["Price_Trend"] = df["ClosePrice"].diff().apply(
+    lambda x: "Bullish" if x > 0 else ("Bearish" if x < 0 else "Neutral")
+)
+df["RSI_Trend"] = df["RSI"].diff().apply(
+    lambda x: "Bullish" if x > 0 else ("Bearish" if x < 0 else "Neutral")
+)
+
+# Detect divergence using updated trends
+def detect_divergence(row):
+    if row["Price_Trend"] == "Bearish" and row["RSI_Trend"] == "Bullish":
+        return "Bullish"
+    elif row["Price_Trend"] == "Bullish" and row["RSI_Trend"] == "Bearish":
+        return "Bearish"
+    else:
+        return None
+
+df["Divergence"] = df.apply(detect_divergence, axis=1)
+
+# Display results
+print(df[["Date", "ClosePrice", "RSI", "Price_Trend", "RSI_Trend", "Divergence"]])
+
+#calculate final trends 
+# Define weights for each trend
+weights = {
+    "Price_Trend": 0.4,
+    "RSI_Trend": 0.3,
+    "trendLong": 0.2,
+    "trendShort": 0.1,
+    "VolumeTrend": 0.2
+}
+
+# Calculate overall score for each row
+def calculate_trend_score(row):
+    score = 0
+    for trend, weight in weights.items():
+        if row[trend] == "Bullish":
+            score += weight  # Positive score for Bullish trends
+        elif row[trend] == "Bearish":
+            score -= weight  # Negative score for Bearish trends
+    return score
+
+df["TrendScore"] = df.apply(calculate_trend_score, axis=1)
+
+# Determine overall trend
+def overall_trend(score):
+    if score > 0:
+        return "Positive"
+    elif score < 0:
+        return "Negative"
+    else:
+        return "Neutral"
+
+df["OverallTrend"] = df["TrendScore"].apply(overall_trend)
+
+# Display results
+print(df[["Date", "Price_Trend", "RSI_Trend", "TrendScore", "OverallTrend"]])
+df[["trendShort","trendLong","VolumeTrend","RSI_Trend", "OverallTrend"]].mode()
